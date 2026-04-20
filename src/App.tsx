@@ -5,30 +5,56 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Settings, BarChart2, Calendar, Clock, ChevronRight } from 'lucide-react';
+import { Settings, BarChart2, Calendar, Clock, ChevronRight, Database, CheckCircle2 } from 'lucide-react';
 import { format, differenceInMilliseconds, isAfter, isBefore, parseISO } from 'date-fns';
+import { get, set } from 'idb-keyval';
 import { cn } from './lib/utils';
 
 type View = 'progress' | 'settings';
 
 export default function App() {
   const [view, setView] = useState<View>('progress');
-  const [startDate, setStartDate] = useState<string>(() => {
-    const saved = localStorage.getItem('horizon_start');
-    return saved || new Date().toISOString();
-  });
-  const [endDate, setEndDate] = useState<string>(() => {
-    const saved = localStorage.getItem('horizon_end');
-    return saved || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  });
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [startDate, setStartDate] = useState<string>(new Date().toISOString());
+  const [endDate, setEndDate] = useState<string>(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString());
 
+  // Load from IndexedDB
   useEffect(() => {
-    localStorage.setItem('horizon_start', startDate);
-  }, [startDate]);
+    async function loadData() {
+      const savedStart = await get('horizon_start');
+      const savedEnd = await get('horizon_end');
+      
+      if (savedStart) setStartDate(savedStart);
+      if (savedEnd) setEndDate(savedEnd);
+      setIsLoaded(true);
+    }
+    loadData();
+  }, []);
 
-  useEffect(() => {
-    localStorage.setItem('horizon_end', endDate);
-  }, [endDate]);
+  // Save to IndexedDB
+  const handleSetStart = async (s: string) => {
+    setStartDate(s);
+    await set('horizon_start', s);
+  };
+
+  const handleSetEnd = async (e: string) => {
+    setEndDate(e);
+    await set('horizon_end', e);
+  };
+
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+        <motion.div 
+          animate={{ opacity: [0.4, 1, 0.4] }} 
+          transition={{ duration: 1.5, repeat: Infinity }}
+          className="text-zinc-500 font-mono text-xs uppercase tracking-widest"
+        >
+          Initializing DB...
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#050505] text-zinc-100 font-sans selection:bg-zinc-500/30">
@@ -45,8 +71,8 @@ export default function App() {
             key="settings" 
             startDate={startDate} 
             endDate={endDate} 
-            onSetStart={setStartDate} 
-            onSetEnd={setEndDate} 
+            onSetStart={handleSetStart} 
+            onSetEnd={handleSetEnd} 
             onNavigate={() => setView('progress')} 
           />
         )}
@@ -130,7 +156,7 @@ function ProgressPage({ startDate, endDate, onNavigate }: { startDate: string, e
       className="p-6 pt-16 flex flex-col items-center justify-center min-h-screen text-center max-w-lg mx-auto"
     >
       <header className="mb-12">
-        <h1 className="text-4xl font-light tracking-tight mb-2 text-zinc-100">Your Journey</h1>
+        <h1 className="text-4xl font-light tracking-tight mb-2 text-zinc-100 italic font-serif">Horizon</h1>
         <p className="text-zinc-500 text-sm flex items-center justify-center gap-2">
           <Calendar size={14} />
           {format(parseISO(startDate), 'MMM d, yyyy')} — {format(parseISO(endDate), 'MMM d, yyyy')}
@@ -203,6 +229,16 @@ function SettingsPage({
   onNavigate: () => void,
   key?: string
 }) {
+  const [saving, setSaving] = useState(false);
+
+  const handleUpdate = async (type: 'start' | 'end', val: string) => {
+    setSaving(true);
+    if (type === 'start') onSetStart(val);
+    else onSetEnd(val);
+    // Simulate slight delay for "Professional DB" feel
+    setTimeout(() => setSaving(false), 600);
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, scale: 0.98 }}
@@ -211,36 +247,40 @@ function SettingsPage({
       className="p-6 pt-24 pb-32 max-w-md mx-auto"
     >
       <header className="mb-12">
-        <h2 className="text-3xl font-light tracking-tight text-white">Timeline Settings</h2>
-        <p className="text-zinc-500 text-sm mt-2">Define your tracking boundaries.</p>
+        <h2 className="text-3xl font-light tracking-tight text-white flex items-center gap-3">
+          Timeline
+          <span className="text-xs font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-500 uppercase tracking-widest">Settings</span>
+        </h2>
+        <p className="text-zinc-500 text-sm mt-2">Manage your persistent chronology.</p>
       </header>
 
       <div className="space-y-6">
         <div className="space-y-2">
-          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-4">
-            Start Date
+          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-4 flex items-center gap-2">
+            Start Reference
+            {saving && <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-2 h-2 rounded-full border border-zinc-500 border-t-transparent" />}
           </label>
           <div className="relative">
             <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
             <input 
               type="datetime-local" 
               value={format(parseISO(startDate), "yyyy-MM-dd'T'HH:mm")}
-              onChange={(e) => onSetStart(new Date(e.target.value).toISOString())}
+              onChange={(e) => handleUpdate('start', new Date(e.target.value).toISOString())}
               className="w-full bg-zinc-900 border border-white/10 rounded-2xl p-4 pl-12 text-white focus:outline-none focus:ring-1 focus:ring-zinc-400 transition-all cursor-pointer"
             />
           </div>
         </div>
 
         <div className="space-y-2">
-          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-4">
-            Target Date
+          <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-4 flex items-center gap-2">
+            Target Horizon
           </label>
           <div className="relative">
             <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
             <input 
               type="datetime-local" 
               value={format(parseISO(endDate), "yyyy-MM-dd'T'HH:mm")}
-              onChange={(e) => onSetEnd(new Date(e.target.value).toISOString())}
+              onChange={(e) => handleUpdate('end', new Date(e.target.value).toISOString())}
               className="w-full bg-zinc-900 border border-white/10 rounded-2xl p-4 pl-12 text-white focus:outline-none focus:ring-1 focus:ring-zinc-400 transition-all cursor-pointer"
             />
           </div>
@@ -251,17 +291,21 @@ function SettingsPage({
             onClick={onNavigate}
             className="w-full bg-white text-black font-semibold rounded-2xl p-4 active:scale-95 transition-transform"
           >
-            Done
+            Update Dashboard
           </button>
           
-          <div className="p-4 rounded-2xl bg-zinc-900/30 border border-dotted border-white/10">
-            <p className="text-[11px] leading-relaxed text-zinc-500 text-center italic">
-              Changes are saved locally to your browser. Your timeline data remains private.
-            </p>
+          <div className="p-4 rounded-2xl bg-zinc-900/30 border border-dashed border-white/10 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Database size={16} className="text-zinc-500" />
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Database Status</span>
+                <span className="text-[11px] text-zinc-600">IndexedDB / Chrome Native</span>
+              </div>
+            </div>
+            <CheckCircle2 size={16} className="text-emerald-500/50" />
           </div>
         </div>
       </div>
     </motion.div>
   );
 }
-
